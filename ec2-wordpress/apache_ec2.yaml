@@ -1,0 +1,99 @@
+---
+- hosts: webservers
+  sudo: yes
+  vars: 
+    http_port: 80
+    #domain: sebswebs.co.uk
+    websites:
+      - northlondonpaediatrician.co.uk
+      - paediatricpearls.co.uk
+      - sebsbread.co.uk
+      - tiroracing.co.uk
+      - tobythomson.co.uk
+      - lava3d.xyz
+      - nicheinternational.org.uk
+      - logoawesome.co.uk
+      - roadrunner.ltd
+  
+  tasks:
+    - name: install apache2
+      apt: name={{ item }} update_cache=yes state=latest
+      with_items:
+        - apache2
+        - git
+        - php5
+        - php5-mysql 
+        - libapache2-mod-php5 
+        - php5-mcrypt
+        - unzip
+
+
+    - name: enable mod rewrite
+      apache2_module: name=rewrite state=present
+      notify:
+        - restart apache2
+
+    - name: enable mod expires
+      apache2_module: name=expires state=present
+      notify:
+        - restart apache2
+
+
+    - name: create virtual host file
+      template: src=virtualhost.conf dest=/etc/apache2/sites-available/{{ item }}.conf
+      with_items: 
+        - "{{ websites }}"
+      notify:
+        - restart apache2
+
+    - name: create directories
+      file:
+        path: /var/www/{{ item }}
+        state: directory
+        mode: 0755
+      with_items: 
+        - "{{ websites }}"
+
+    #   TODO: STAT IF IT EXISTS FIRST
+    - name: upload and unzip website contents
+      unarchive:
+        src: website_zips/{{ item }}.zip
+        dest: /var/www/{{ item }}
+        creates: /var/www/{{ item }}/wp-config.php
+      with_items:
+        - "{{ websites }}"
+
+    - name: Replace db host in wp-config with the RDS instance
+      lineinfile: 
+        path: /var/www/{{ item }}/wp-config.php
+        regexp: "^define('DB_HOST', 'localhost');"
+        line: "define('DB_HOST', 'sebs-db.cfm6arboi1nv.eu-west-2.rds.amazonaws.com');"
+      with_items: 
+        - "{{ websites }}"
+      notify:
+        - restart apache2
+
+    - name: change ownership of /wp-content/ to www-data
+      file: 
+        dest: /var/www/
+        owner: www-data
+        group: www-data
+        recurse: yes
+      notify:
+        - restart apache2
+
+
+    - name: a2ensite all sites
+      command: a2ensite {{ item }}
+      with_items: 
+        - "{{ websites }}"
+      notify:
+        - restart apache2
+      args:
+        creates: /etc/apache2/sites-enabled/{{ item }}.conf
+      notify: 
+        - restart apache2
+
+  handlers:
+    - name: restart apache2
+      service: name=apache2 state=restarted
