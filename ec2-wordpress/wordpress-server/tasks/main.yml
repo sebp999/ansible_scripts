@@ -1,5 +1,5 @@
 ---
-# tasks file for wordpress-server
+#tasks file for wordpress-server
 - name: install apache2
   apt: name={{ item }} update_cache=yes state=latest
   with_items:
@@ -10,7 +10,16 @@
   - libapache2-mod-php5 
   - php5-mcrypt
   - unzip
-
+  
+- name: create directories for log files
+  file:
+    path: /var/log/apache2/{{ item }}
+    state: directory
+    mode: 0755
+  with_items: 
+  - "{{ websites }}"
+  notify:
+  - restart apache2
 
 - name: enable mod rewrite
   apache2_module: name=rewrite state=present
@@ -30,29 +39,42 @@
   notify:
   - restart apache2
 
-- name: create directories
+- name: create directories for websites
   file:
     path: /var/www/{{ item }}
     state: directory
     mode: 0755
   with_items: 
   - "{{ websites }}"
+  notify:
+  - restart apache2
 
-#   notify:
-# - restart apache2
-# - name: upload and unzip website contents
-#   unarchive:
-#   src: website_zips/{{ item }}.zip
-#   dest: /var/www/{{ item }}
-#   creates: /var/www/{{ item }}/wp-config.php
-#   with_items:
-#   - "{{ websites }}"
+
+
+
+##This uploads a zip if it exists and if there isn't already a wp-config.php at the destination
+## {{ role_path }} gives the path to the directory where the role is ie full path
+
+- name: see if the zips exist
+  local_action: stat path={{ role_path }}/files/{{ item }}.zip
+  with_items:
+  - "{{ websites }}"
+  register: st
+
+- name: upload and unzip website contents if they exist
+  unarchive:
+    src: "{{ role_path }}/files/{{ item.item }}.zip"
+    dest: /var/www/{{ item.item }}
+    creates: /var/www/{{ item.item }}/wp-config.php
+  with_items: "{{ st.results }}"
+  when: item.stat.exists
 
 - name: Replace db host in wp-config with the RDS instance
   lineinfile: 
     path: /var/www/{{ item }}/wp-config.php
-    regexp: "^define('DB_HOST', 'localhost');"
-    line: "define('DB_HOST', 'sebs-db.cfm6arboi1nv.eu-west-2.rds.amazonaws.com');"
+    regexp: "define.*DB_HOST.*localhost"
+    backrefs: yes #this way if the line is found it is NOT APPENDED, which is the default
+    line: "define('DB_HOST', '{{ db_host }}');"
   with_items: 
     - "{{ websites }}"
   notify:
@@ -72,8 +94,6 @@
   command: a2ensite {{ item }}
   with_items: 
   - "{{ websites }}"
-  notify:
-  - restart apache2
   args:
     creates: /etc/apache2/sites-enabled/{{ item }}.conf
   notify: 
