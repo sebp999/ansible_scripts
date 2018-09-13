@@ -10,7 +10,7 @@
   - libapache2-mod-php5 
   - php5-mcrypt
   - unzip
-  
+
 - name: create directories for log files
   file:
     path: /var/log/apache2/{{ item }}
@@ -20,6 +20,18 @@
   - "{{ websites }}"
   notify:
   - restart apache2
+
+## Create directories for log files where the site will redirect to another
+- name: create directories for log files
+  file:
+    path: /var/log/apache2/{{ item.from_site }}
+    state: directory
+    mode: 0755
+  with_items:
+  - "{{ alias_websites }}"
+  notify:
+  - restart apache2
+
 
 - name: enable mod rewrite
   apache2_module: name=rewrite state=present
@@ -39,6 +51,15 @@
   notify:
   - restart apache2
 
+
+- name: create virtual host file for redirects 
+  template: src=virtualhost_redirect.conf dest=/etc/apache2/sites-available/"{{ item.from_site }}".conf
+  with_items:
+  - "{{ alias_websites }}"
+  notify:
+  - restart apache2
+
+
 - name: create directories for websites
   file:
     path: /var/www/{{ item }}
@@ -48,9 +69,6 @@
   - "{{ websites }}"
   notify:
   - restart apache2
-
-
-
 
 ##This uploads a zip if it exists and if there isn't already a wp-config.php at the destination
 ## {{ role_path }} gives the path to the directory where the role is ie full path
@@ -98,3 +116,13 @@
     creates: /etc/apache2/sites-enabled/{{ item }}.conf
   notify: 
   - restart apache2
+
+- name: a2ensite redirected sites
+  command: a2ensite {{ item.from_site }}
+  with_items:
+  - "{{ alias_websites }}"
+  args:
+    creates: /etc/apache2/sites-enabled/{{ item.from_site }}.conf
+  notify:
+  - restart apache2
+
